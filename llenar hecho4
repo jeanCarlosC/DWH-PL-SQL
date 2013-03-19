@@ -1,0 +1,186 @@
+create or replace
+PROCEDURE LLENAR_HECHO4 AS
+
+
+cursor primero is
+
+select fi.fecha_id FECHAI_N, ih.his_fecha_inicio FECHAI_V, ff.fecha_id FECHAF_N, ih.his_fecha_fin FECHAF_V, fa.falla_id FALLA_N, it.svo_codigo FALLA_V, 
+lcd.localidad_id LOC_N, loc.ctr_id_centro LOC_V, edif.edificio_id EDIF_N, loc.edo_codigo EDIF_V from items_historicos ih
+
+join fecha_ini fi
+on fi.fecha_i = to_Date(ih.his_fecha_inicio,'DD/MM/YY')
+join fecha_fin ff
+on ff.fecha_f = to_date(ih.his_fecha_fin,'DD/MM/YY')
+join items it
+on it.svo_codigo= ih.svo_codigo 
+join falla fa 
+on fa.falla_id_viejo = it.svo_codigo
+join sds_localidades_lcd loc 
+on loc.lcd_codigo = it.lcd_codigo
+join localidad lcd
+on lcd.loc_id_viejo = loc.lcd_codigo
+join edificio ed
+on loc.edo_codigo = ed.edo_codigo
+join edificios edif
+on edif.ed_id_viejo = loc.edo_codigo;
+
+
+------------------------------- CURSOR FALLAS SIMULTANEAS -----------------------------------
+
+
+cursor fallas_simult(IDFALLA items.svo_codigo%type, IDEDIF edificio.edo_codigo%type, IDLOCALIDAD sds_localidades_lcd.lcd_codigo%type, IDFECHAI items_historicos.his_fecha_inicio%type, IDFECHAF items_historicos.his_fecha_fin%type) 
+is
+
+select count(x.falla) cantidad, x.fecha_ini, x.fecha_fin, x.localidad, x.edificio 
+from   (select distinct(ih.fmo_codigo) formato, ih.svo_codigo falla, ih.his_fecha_inicio fecha_ini, ih.his_fecha_fin fecha_fin, lcd.lcd_codigo localidad, edif.edo_codigo edificio 
+        from items_historicos ih
+            join items it
+            on it.svo_codigo = ih.svo_codigo and it.fmo_codigo = ih.fmo_codigo
+            join sds_localidades_lcd lcd
+            on it.lcd_codigo = lcd.lcd_codigo
+            join edificio edif
+            on lcd.edo_codigo = edif.edo_codigo
+            where ih.etu_codigo =4
+        order by 3)x
+where x.fecha_ini = IDFECHAI and x.fecha_fin = IDFECHAF and x.falla = IDFALLA and x.edificio = IDEDIF and x.localidad = IDLOCALIDAD
+group by x.fecha_ini,x.fecha_fin, x.localidad, x.edificio;
+
+
+
+
+------------------- fallas mas comunes x edif ------------------------------------------
+
+cursor fallas_comunes (IDFALLA items.svo_codigo%type, IDEDIF edificio.edo_codigo%type, IDLOCALIDAD sds_localidades_lcd.lcd_codigo%type, IDFECHAI items_historicos.his_fecha_inicio%type, IDFECHAF items_historicos.his_fecha_fin%type) 
+is
+
+select x.edif, MAX(x.cant) cant_max, x.falla, x.fechaf, x.fechai, x.localidad  from
+  (
+  select ih.svo_codigo falla, ed.edo_codigo edif, count(ih.his_fecha_inicio) cant,ih.his_fecha_inicio fechai, ih.his_fecha_fin fechaf, lcd.lcd_codigo localidad from items_historicos ih
+  join items it on it.svo_codigo = ih.svo_codigo and it.fmo_codigo = ih.fmo_codigo
+  join  sds_localidades_lcd lcd  on lcd.lcd_codigo = it.lcd_codigo
+  join edificio ed on ed.edo_codigo = lcd.edo_codigo
+  group by ih.svo_codigo, ed.edo_codigo,ih.his_fecha_inicio, ih.his_fecha_fin, lcd.lcd_codigo   
+  order by 2,3)x
+  where x.edif=IDEDIF and x.falla=IDFALLA and x.fechaf = IDFECHAF and x.fechai = IDFECHAI and x.localidad = IDLOCALIDAD
+  group by x.edif, x.falla, x.fechaf,x.fechai, x.localidad 
+  order by 1;
+
+
+
+
+
+---------------- tiempo entre 2 fallas iguales por localidad ---------------------------
+
+cursor fallas_iguales (IDFALLA items.svo_codigo%type, IDEDIF edificio.edo_codigo%type, IDLOCALIDAD sds_localidades_lcd.lcd_codigo%type, IDFECHAI items_historicos.his_fecha_inicio%type, IDFECHAF items_historicos.his_fecha_fin%type) 
+is
+
+      select yy.f2-xx.f1 tiempo_diferencia,xx.ffin from
+      (select distinct( ih.his_fecha_inicio) f1,lcd.lcd_codigo localidad, ih.svo_codigo falla, ts.tso_codigo tipofalla, ih.his_fecha_fin ffin from items_historicos ih
+      join items it on it.svo_codigo= ih.svo_codigo and ih.fmo_codigo = it.fmo_codigo
+      join sds_localidades_lcd lcd on lcd.lcd_codigo = it.lcd_codigo
+      join servicios ser on ser.svo_codigo = it.svo_codigo
+      join sds_tipo_servicios_tso ts on ts.tso_codigo = ser.tso_codigo
+      where lcd.lcd_codigo=100181 and ih.svo_codigo=16  and rownum = 1
+      order by 2,3,1) xx
+join 
+      (select distinct( ih.his_fecha_inicio) f2,lcd.lcd_codigo localidad, ih.svo_codigo falla, ts.tso_codigo tipofalla from items_historicos ih
+      join items it on it.svo_codigo= ih.svo_codigo and ih.fmo_codigo = it.fmo_codigo
+      join sds_localidades_lcd lcd on lcd.lcd_codigo = it.lcd_codigo
+      join servicios ser on ser.svo_codigo = it.svo_codigo
+      join sds_tipo_servicios_tso ts on ts.tso_codigo = ser.tso_codigo
+      where lcd.lcd_codigo=100181 and ih.svo_codigo=16  and rownum = 1 and ih.his_fecha_inicio not in
+      (select x.fecha from
+      (select distinct( ih.his_fecha_inicio) fecha,lcd.lcd_codigo localidad, ih.svo_codigo falla, ts.tso_codigo tipofalla from items_historicos ih
+      join items it on it.svo_codigo= ih.svo_codigo and ih.fmo_codigo = it.fmo_codigo
+      join sds_localidades_lcd lcd on lcd.lcd_codigo = it.lcd_codigo
+      join servicios ser on ser.svo_codigo = it.svo_codigo
+      join sds_tipo_servicios_tso ts on ts.tso_codigo = ser.tso_codigo
+      where lcd.lcd_codigo=100181 and ih.svo_codigo=16 and rownum = 1
+      order by 2,3,1) x ))yy
+on xx.localidad=yy.localidad and xx.falla=yy.falla and xx.tipofalla = yy.tipofalla
+WHERE xx.f1 = IDFECHAI and xx.ffin = IDFECHAF;
+
+
+
+------------- tiempo entre 2 fallas diferentes por localidad -----------------------------------
+
+
+cursor fallas_diferentes (IDFALLA items.svo_codigo%type, IDEDIF edificio.edo_codigo%type, IDLOCALIDAD sds_localidades_lcd.lcd_codigo%type, IDFECHAI items_historicos.his_fecha_inicio%type, IDFECHAF items_historicos.his_fecha_fin%type) 
+is
+
+select segunda.fechayy-primera.fechaxx tiempo_diferencia from
+
+
+      (select xx.f1 fechaxx, xx.localidad locxx, xx.falla fallaxx, xx.tipofalla tipoxx, xx.edif edifxx, xx.ffin ffinxx from
+      (select distinct( ih.his_fecha_inicio) f1,lcd.lcd_codigo localidad, ih.svo_codigo falla, ts.tso_codigo tipofalla, ed.edo_codigo edif, ih.his_fecha_fin ffin  from items_historicos ih
+      join items it on it.svo_codigo= ih.svo_codigo and ih.fmo_codigo = it.fmo_codigo
+      join sds_localidades_lcd lcd on lcd.lcd_codigo = it.lcd_codigo
+      JOIN edificio ed on ed.edo_codigo = lcd.edo_codigo
+      join servicios ser on ser.svo_codigo = it.svo_codigo
+      join sds_tipo_servicios_tso ts on ts.tso_codigo = ser.tso_codigo
+      where lcd.lcd_codigo=IDLOCALIDAD and ih.svo_codigo=IDFALLA and ts.tso_codigo=10
+      order by 2,3,1) xx
+      where rownum =1)primera
+
+join 
+
+(select yy.f2 fechayy, yy.localidad locyy, yy.falla fallayy, yy.tipofalla tipoyy, yy.edif edifyy from
+      (select distinct( ih.his_fecha_inicio) f2,lcd.lcd_codigo localidad, ih.svo_codigo falla, ts.tso_codigo tipofalla, ed.edo_codigo edif from items_historicos ih
+      join items it on it.svo_codigo= ih.svo_codigo and ih.fmo_codigo = it.fmo_codigo
+      join sds_localidades_lcd lcd on lcd.lcd_codigo = it.lcd_codigo
+      JOIN edificio ed on ed.edo_codigo = lcd.edo_codigo
+      join servicios ser on ser.svo_codigo = it.svo_codigo
+      join sds_tipo_servicios_tso ts on ts.tso_codigo = ser.tso_codigo
+      where lcd.lcd_codigo=IDLOCALIDAD and ih.svo_codigo<>IDFALLA and ts.tso_codigo<>10
+      order by 2,3,1)yy
+      where rownum=1) segunda
+      
+on primera.locxx=segunda.locyy and primera.fallaxx<>segunda.fallayy and primera.tipoxx<>segunda.tipoyy
+
+where primera.fechaxx = IDFECHAI and ffinxx=IDFECHAF and edifxx= IDEDIF and edifyy = IDEDIF;
+
+v_primero primero%rowtype;
+v_fallas_simult fallas_simult%rowtype;
+v_fallas_comunes fallas_comunes%rowtype;
+v_fallas_iguales fallas_iguales%rowtype;
+v_fallas_diferentes fallas_diferentes%rowtype;
+
+BEGIN
+
+
+DBMS_OUTPUT.DISABLE;
+DBMS_OUTPUT.ENABLE(1000000);
+
+open primero;
+loop
+fetch primero into v_primero;
+exit when primero%NOTFOUND;
+open fallas_simult(v_primero.FALLA_V,v_primero.EDIF_V, v_primero.LOC_V, v_primero.FECHAI_V, v_primero.FECHAF_V);
+open fallas_comunes(v_primero.FALLA_V,v_primero.EDIF_V, v_primero.LOC_V, v_primero.FECHAI_V, v_primero.FECHAF_V);
+open fallas_iguales(v_primero.FALLA_V, v_primero.EDIF_V, v_primero.LOC_V, v_primero.FECHAI_V, v_primero.FECHAF_V);
+open fallas_diferentes(v_primero.FALLA_V, v_primero.EDIF_V, v_primero.LOC_V, v_primero.FECHAI_V, v_primero.FECHAF_V);
+
+loop
+
+fetch fallas_simult into v_fallas_simult;
+fetch fallas_comunes into v_fallas_comunes;
+fetch fallas_iguales into v_fallas_iguales;
+fetch fallas_diferentes into v_fallas_diferentes;
+exit when fallas_comunes%notfound;  
+ 
+
+dbms_output.put_line(v_primero.FALLA_N||' '||v_primero.EDIF_N||' '||v_primero.LOC_N||' '||v_primero.FECHAI_N||' '||v_primero.FECHAF_N||' '||v_fallas_simult.cantidad||' '||v_fallas_iguales.tiempo_diferencia||' '||v_fallas_diferentes.tiempo_diferencia||' '||v_fallas_comunes.cant_max);
+--insert into HECHO4(FALLA_ID, EDIFICIO_ID, LOCALIDAD_ID, FECHA_I_ID, FECHA_F_ID, CANT_FALLAS_SIMULT, TIEMP_FALLAS_IGUALES, TIEMP_FALLAS_DIF, CANT_FALLAS_COMUNES_EDIF)
+--values (v_primero.FALLA_N, v_primero.EDIF_N, v_primero.LOC_N, v_primero.FECHAI_N, v_primero.FECHAF_N, v_fallas_simult.cantidad, v_fallas_iguales.tiempo_diferencia, v_fallas_diferentes.tiempo_diferencia, v_fallas_comunes.cant_max)
+end loop;
+
+close fallas_diferentes;
+close fallas_iguales;
+close fallas_comunes;
+close fallas_simult;
+
+end loop;
+
+close primero;
+
+END LLENAR_HECHO4;

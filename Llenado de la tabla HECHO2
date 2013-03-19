@@ -1,0 +1,84 @@
+--------------------------------------HECHO 2------------------------------------------
+
+create or replace
+procedure LLENAR_HECHO2 as
+cursor primerC is 
+                  select ff.fecha_id FECHA_F_N, ih.his_fecha_fin FECHA_F_V, fi.fecha_id FECHA_I_N, ih.his_fecha_inicio FECHA_I_V ,fa.falla_id FALLA_N, serv.svo_codigo FALLA_V,
+                  ra.rama_id RAMA_N, sts.tso_codigo RAMA_V, ed.EMPLEADo_ID EMPLEADO_N, ap.infa_cedula EMPLEADO_V
+                  from items_historicos ih
+                  join fecha_fin ff on ff.fecha_f = to_date(ih.his_fecha_fin,'dd/mm/yy')
+                  join fecha_ini fi on fi.fecha_i = to_date(ih.his_fecha_inicio,'dd/mm/yy')
+                  join servicios serv on serv.svo_codigo = ih.svo_codigo
+                  join falla fa on fa.falla_id_viejo = serv.svo_codigo
+                  join sds_tipo_servicios_tso sts on sts.tso_codigo = serv.tso_codigo
+                  join rama ra on ra.rama_id_viejo = sts.tso_codigo
+                  join asig_personal ap on ap.svo_codigo = ih.svo_codigo and ih.fmo_codigo = ap.fmo_codigo
+                  join empleado ed on ed.cedula = ap.infa_cedula
+                  where ih.his_fecha_inicio is not null and ih.his_fecha_fin is not null
+                  order by 5,7;
+                  
+cursor Cantidad_Fallas(ID_FECHA_FIN items_historicos.his_fecha_fin%type, ID_FECHA_INI items_historicos.his_fecha_inicio%type, ID_FALLA servicios.svo_codigo%type,
+                       ID_RAMA sds_tipo_servicios_tso.tso_codigo%type, ID_EMPLEADO asig_personal.infa_cedula%type)
+                       is 
+                        select x.FALLA, x.EMPLEADO, count(x.FORMATO) CANTIDAD_FALLAS from
+                        
+                        (SELECT distinct (ap.fmo_codigo) FORMATO,ap.infa_cedula EMPLEADO,ap.svo_codigo FALLA,ih.his_fecha_fin FIN, ih.his_fecha_inicio INICIO,
+                        sts.tso_codigo RAMA
+                        FROM servicios serv
+                        join items it on it.svo_codigo = serv.svo_codigo 
+                        join asig_personal ap on serv.svo_codigo = ap.svo_codigo
+                        join sds_tipo_servicios_tso sts on sts.tso_codigo = serv.tso_codigo 
+                        join items_historicos ih on ih.fmo_codigo= it.fmo_codigo and ih.svo_codigo = it.svo_codigo
+                        order by 2,3)x
+                        where x.FIN = ID_FECHA_FIN and x.INICIO = ID_FECHA_INI and x.FALLA=ID_FALLA and x.RAMA = ID_RAMA and x.EMPLEADO = ID_EMPLEADO
+                        group by x.FALLA, x.EMPLEADO
+                        order by 2,1;
+                        
+cursor Tiempo_prom(ID_FECHA_FIN items_historicos.his_fecha_fin%type, ID_FECHA_INI items_historicos.his_fecha_inicio%type, ID_FALLA servicios.svo_codigo%type,
+                   ID_RAMA sds_tipo_servicios_tso.tso_codigo%type, ID_EMPLEADO asig_personal.infa_cedula%type) 
+                    is
+                    select x.FALLA, x.RAMA, x.EMPLEADO, x.PROME PROMEDIO,x.FIN,x.INICIO  from
+                    (select  ih.his_fecha_fin FIN, ih.his_fecha_inicio INICIO, ap.infa_cedula EMPLEADO, ih.svo_codigo FALLA, ts.tso_codigo RAMA, round(avg(ih.his_fecha_fin - ih.his_fecha_inicio),2) PROME from items_historicos ih
+                    join servicios ser on ser.svo_codigo = ih.svo_codigo
+                    join sds_tipo_servicios_tso ts on ts.tso_codigo = ser.tso_codigo
+                    join asig_personal ap on ser.svo_codigo = ap.svo_codigo
+                    where ih.etu_codigo = 4
+                    GROUP by ap.infa_cedula,ih.svo_codigo, ts.tso_codigo,ih.his_fecha_fin,ih.his_fecha_inicio
+                    order by 2,4) x
+                    where x.FIN = ID_FECHA_FIN and x.INICIO = ID_FECHA_INI and x.FALLA = ID_FALLA and x.RAMA = ID_RAMA and x.EMPLEADO = ID_EMPLEADO
+                    order by 1,4;
+                    
+                    V_PrimerC PrimerC%rowtype;
+                    V_Cantidad_Fallas Cantidad_Fallas%rowtype;
+                    V_Tiempo_prom Tiempo_prom%rowtype;
+                    BEGIN
+                    
+                    DBMS_OUTPUT.DISABLE;
+                    DBMS_OUTPUT.ENABLE(1000000);
+                    
+                    open PrimerC;
+                    loop
+                    fetch PrimerC into V_PrimerC;
+                    exit when PrimerC%NOTFOUND;
+                    open Cantidad_Fallas(V_PrimerC.FECHA_F_V, V_PrimerC.FECHA_I_V, V_PrimerC.FALLA_V,V_PrimerC.RAMA_V,V_PrimerC.EMPLEADO_V);
+                    open Tiempo_prom(V_PrimerC.FECHA_F_V, V_PrimerC.FECHA_I_V, V_PrimerC.FALLA_V,V_PrimerC.RAMA_V,V_PrimerC.EMPLEADO_V);
+                    loop
+                    FETCH cantidad_fallas INTO v_cantidad_fallas;
+                    FETCH Tiempo_prom into v_tiempo_prom;
+                    
+                    exit when Tiempo_prom%NOTFOUND;
+                    
+                    --dbms_output.put_line(v_PrimerC.FALLA_N||' '||v_PrimerC.RAMA_N||' '||v_PrimerC.EMPLEADO_N||' '||v_PrimerC.FECHA_I_N||' '||v_PrimerC.FECHA_F_N||' promedio:'||V_Tiempo_prom.PROMEDIO||' cantidad_fallas:'||V_Cantidad_Fallas.CANTIDAD_FALLAS);
+                    insert into HECHO2(FALLA_ID,RAMA_ID,EMPLEADO_ID,FECHA_I_ID,FECHA_F_ID,TIEM_PROM_EMP_FALLA,CANT_FALLA_EMP_RAMA)
+                    values(v_PrimerC.FALLA_N,v_PrimerC.RAMA_N,v_PrimerC.EMPLEADO_N,v_PrimerC.FECHA_I_N,v_PrimerC.FECHA_F_N,V_Tiempo_prom.PROMEDIO,V_Cantidad_Fallas.CANTIDAD_FALLAS);
+                    end loop;
+                    
+                    close Cantidad_Fallas;
+                    close Tiempo_prom;
+
+                    end loop;
+                   
+                    close PrimerC;
+
+                    END LLENAR_HECHO2;
+                    
